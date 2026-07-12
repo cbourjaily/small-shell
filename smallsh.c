@@ -1,4 +1,4 @@
-/* Program Name: smallshell.c
+/* Program Name: smallsh.c
  * Author: Christopher Vote
  *
  * Description:
