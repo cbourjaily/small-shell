@@ -1,5 +1,7 @@
 /* Program Name: smallshell.c
  * Author: Christopher Vote
+ *
+ * Description:
  * This program implements a small shell. It supports general shell commands and scripts
  * and includes built-in commands: exit, cd, and status.
 */
