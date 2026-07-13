@@ -109,12 +109,11 @@ struct command_line *parse_input()
 	return curr_command;
 }
 
-int check_built_ins(struct command_line *curr_command);
+void dispatch_command(struct command_line *curr_command);
 void process_exit(struct command_line *curr_command);
 void process_cd(struct command_line *curr_command);
 void print_status();
 void set_status(char* message, int value);
-void route_command(struct command_line *curr_command);
 void execute_foreground(struct command_line *curr_command);
 void execute_background(struct command_line *curr_command);
 void handle_SIGTSTP (int signo);
@@ -166,42 +165,32 @@ int main() {
 			continue;
 		}
 
-		// Check for arguments
-		if (!(check_built_ins(curr_command))) {
-			route_command(curr_command);
-		}
-		// Check for completed background processes
+		// Command dispatch
+		dispatch_command(curr_command);
+	
 		free_command(curr_command);
 	}
 	return EXIT_SUCCESS;
 }
 
-int check_built_ins(struct command_line *curr_command) {
+void dispatch_command(struct command_line *curr_command) {
 	// Built-in Commands exit, cd, and status handled by shell (others passed to exec())
 	// 	no redirection or exit status needed for built-ins
-	// 	run in foreground and ignore &
 	
-	// Check if command is exit, cd, or status and return 0 if not.	
+	// Check if command is exit, cd, or status and return 1; otherwise return 0.	
 	if (!strcmp(curr_command->argv[0], "exit")) {
 		process_exit(curr_command);
-		return 1;
 	}
 	else if (!strcmp(curr_command->argv[0], "cd")) {
 		process_cd(curr_command);
-		return 1;
 	}
 	else if (!strcmp(curr_command->argv[0], "status")) {
 		print_status();
-		return 1;
 	}
-	// No built-ins found
-	return 0;
-}
-
-void route_command(struct command_line *curr_command) {
-	if (curr_command->is_bg) {
+	else if (curr_command->is_bg) {
 		execute_background(curr_command);
-	} else {
+	} 
+	else {
 		execute_foreground(curr_command);
 	}
 }
