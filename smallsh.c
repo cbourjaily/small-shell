@@ -6,15 +6,16 @@
  * and includes built-in commands: exit, cd, and status.
 */
 
-#include <stdio.h>	// For printf(), perror()
-#include <stdbool.h>	// For bool
-#include <stdlib.h>	// For exit(), 
+#include <stdio.h>	// For printf(), fprintf(), snprintf(), sprintf(), perror(), fgets(), fflush()
+#include <stdlib.h>	// For calloc(), getenv(), exit() 
 #include <string.h>	// For strcmp(), strlen(), strtok(), strdup(), strcspn()
-#include <unistd.h>	// For chdir(), getcwd(), execvp(), getpid(), fork()
-#include <sys/wait.h>	// For waitpid(), 
+#include <unistd.h>	// For chdir(), execvp(), fork(), dup2(), close(), write(), STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO
+#include <signal.h>     // for sigaction(), kill(), SIG_IGN, SIG_DFL, sig_atomic_t
+#include <sys/wait.h>	// For waitpid(), WIFEXITED, WEXITSTATUS, WIFSIGNALED, WTERMSIG
 #include <sys/types.h>	// For pid_t
 #include <errno.h>	// For eerno, EINTR
 #include <fcntl.h>	// For open()
+#include <stdbool.h>	// For bool
 
 #define INPUT_LENGTH 2048
 #define MAX_ARGS 512
@@ -61,7 +62,6 @@ struct command_line
 struct command_line *parse_input()
 {
 	char input[INPUT_LENGTH];
-	struct command_line *curr_command = (struct command_line*) calloc(1, sizeof(struct command_line));
 
 	printf(": ");
 	fflush(stdout);
@@ -79,15 +79,25 @@ struct command_line *parse_input()
 	if (input[0] == '\0' || input[0] == '#') {
 		return NULL;
 	}
-
+	
+	// Allocate memory only after confirming a real command to build
+	struct command_line *curr_command = (struct command_line*) calloc(1, sizeof(struct command_line));
+	
 	// Tokenize the input
 	char *token = strtok(input, " \n");
 	while (token) {
 		if (!strcmp(token, "<")) {
-			curr_command->input_file = strdup(strtok(NULL," \n"));
+			// Check that input for filename exists before executing
+			char *filename  = strtok(NULL, " \n");
+			if (filename) {
+				curr_command->input_file = strdup(filename);
+			}
 		}
 		else if (!strcmp(token, ">")) {
-			curr_command->output_file = strdup(strtok(NULL, " \n"));
+			// Verify output filname exists before executing
+			char *filename = strtok(NULL, " \n");
+			if (filename) {
+				curr_command->output_file = strdup(filename);
 		}
 		else if (!strcmp(token, "&")) {
 
@@ -108,6 +118,7 @@ struct command_line *parse_input()
 }
 
 // Utility / lifecycle
+void install_handler(int signo, void (*handler)(int)); 
 void initialize_shell();
 void set_status(char* message, int value);
 void check_zombies(); 
@@ -132,48 +143,31 @@ void dispatch_command(struct command_line *curr_command);
 
 // Utility / lifecycle
 
+
+void install_handler(int signo, void (*handler)(int)) {
+	struct sigaction action = {0};
+
+	action.sa_handler = handler;
+	action.sa_flags = 0;
+	
+	if (sigaction(signo, &action, NULL) == -1) {
+		perror("sigaction");
+		exit(EXIT_FAILURE);
+	}
+}
+
 void initialize_shell() {
 	// Initialize foreground process exit state
 	set_status(EXIT_MESSAGE, 0);
 	
 	// Initialize SIGINT_action struct to be empty
-	struct sigaction SIGINT_action = {0};
-	
-	// Set SIGINT_action signal handler to ignore
-	//  		Shell and bg children  must ignore SIGINT
-	SIGINT_action.sa_handler = SIG_IGN;
-	// No flags
-	SIGINT_action.sa_flags = 0;
+	install_handler(SIGINT, SIG_IGN);
 
-	// Install signal handler
-	if (sigaction(SIGINT, &SIGINT_action, NULL) == -1) {
-		perror("sigaction(SIGINT)");
-		exit(EXIT_FAILURE);
-	}
+	// Initialize SIGTSTP
+	install_handler(SIGTSTP, handle_SIGTSTP);
 
-	// SIGTSTP: Children must ignore, shell displays message
-	struct sigaction SIGTSTP_action = {0};
-
-	// Set signal handler to handle_SIGTSTP(), which toggles foreground_only state
-	SIGTSTP_action.sa_handler = handle_SIGTSTP;
-	SIGTSTP_action.sa_flags = 0;
-
-	if (sigaction(SIGTSTP, &SIGTSTP_action, NULL) == -1) {
-		perror("sigaction(SIGTSTP)");
-		exit(EXIT_FAILURE);
-	}
-
-	// Initialize handle_SIGCHLD
-	struct sigaction SIGCHLD_action = {0};
-	
-	// Set handler function
-	SIGCHLD_action.sa_handler = handle_SIGCHLD;
-	SIGCHLD_action.sa_flags = 0;
-	
-	if (sigaction(SIGCHLD, &SIGCHLD_action, NULL) == -1) {
-		perror("sigaction(SIGCHLD)");
-		exit(EXIT_FAILURE);
-	}
+	// Initialize SIGCHLD
+	install_handler(SIGCHLD, handle_SIGCHLD);	
 }
 
 void set_status(char* message, int value) {
@@ -181,7 +175,12 @@ void set_status(char* message, int value) {
 }
 
 void check_zombies() {
-	for (int i = 0; i < finished_count; i++) {
+	// snapshot and reset the count to prevent race condition with SIGCHLD
+	int count = finished_count;
+	finished_count = 0;
+
+
+	for (int i = 0; i < count; i++) {
 		if (finished_bgs[i].normal_exit) {
 			printf("background pid %d is done: exit value %d\n", 
 					finished_bgs[i].pid, finished_bgs[i].exit_code);
@@ -191,7 +190,7 @@ void check_zombies() {
 		}
 	}
 	fflush(stdout);
-	finished_count = 0;			// Reset count
+	finished_count = 0;
 }
 
 void free_command(struct command_line *cmd) {
@@ -254,6 +253,7 @@ void handle_SIGCHLD(int signo) {
 
 // Built-in commands
 
+
 void process_exit(struct command_line *curr_command) {
 	// kill background processes
 	for (int i = 0; i < finished_count; i++) {
@@ -269,7 +269,6 @@ void process_exit(struct command_line *curr_command) {
 }
 
 void process_cd(struct command_line *curr_command) {
-
 	if (curr_command->argc > 1) {
 		// chdir returns -1 on failure
 		if (chdir(curr_command->argv[1]) == -1) {
@@ -295,8 +294,8 @@ void print_status() {
 
 // External commands
 
+
 void execute_foreground(struct command_line *curr_command) {
-	
 	// Create child_status variable
 	int child_status;
 
@@ -307,9 +306,10 @@ void execute_foreground(struct command_line *curr_command) {
 		case -1:
 			perror("fork()\n");
 			exit(1);
+		
 		case 0:		
 			if (curr_command->input_file) {
-				// Open source file for read only
+				// Opens source file for read only
 				int source_fd = open(curr_command->input_file, O_RDONLY);
 				if (source_fd == -1) {
 					char msg[INPUT_LENGTH];
@@ -317,7 +317,7 @@ void execute_foreground(struct command_line *curr_command) {
 					write(STDERR_FILENO, msg, len);
 					exit(EXIT_FAILURE);
 				}
-				// Redirect stdin to source file
+				// Redirects stdin to source file
 				int result = dup2(source_fd, 0);
 				if (result == -1) {
 					perror("source dup2");
@@ -327,7 +327,7 @@ void execute_foreground(struct command_line *curr_command) {
 			}
 
 			if (curr_command->output_file) {
-				// Open target file for writing only, truncate, create
+				// Opens target file for write only, truncate, create
 				int target_fd = open(curr_command->output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 				if (target_fd == -1) {
 					char msg[INPUT_LENGTH];
@@ -347,29 +347,22 @@ void execute_foreground(struct command_line *curr_command) {
 
 			// Child running in foreground must terminate at SGINT
 			// 	Rebuild signal handling
-			struct sigaction SIGINT_action = {0};
-	
-			// Set SGINT back to default
-			SIGINT_action.sa_handler = SIG_DFL;
-			
-			// No flags
-			SIGINT_action.sa_flags = 0;
+			install_handler(SIGINT, SIG_DFL);
 
-			// Install signal handler 
-			sigaction(SIGINT, &SIGINT_action, NULL);
-
-			// Search path for executable using execvp
+			// Search path for executable
 			execvp(curr_command->argv[0], curr_command->argv);
 
 			// execvp returns only if there is an error
 			fprintf(stderr, "%s: no such file or directory\n", curr_command->argv[0]);
 			fflush(stderr);
+			free_command(curr_command);
 			exit(EXIT_FAILURE);
+		
 		default:
-
 			pid_t child_pid;
-
-			do {												// NEW
+			
+			// Retry if waitpid() is interrupted by a signal.
+			do {
 				child_pid = waitpid(spawn_pid, &child_status, 0);
 			} while (child_pid == -1 && errno == EINTR);
 
@@ -470,6 +463,7 @@ void execute_background(struct command_line *curr_command) {
 				// execvp returns only if there is an error
 				fprintf(stderr, "%s: no such file or directory\n", curr_command->argv[0]);
 				fflush(stderr);
+				free_command(curr_command);
 				exit(EXIT_FAILURE);
 			}
 		default:
@@ -481,10 +475,9 @@ void execute_background(struct command_line *curr_command) {
 
 // Dispatch
 
+
 void dispatch_command(struct command_line *curr_command) {
-	// Built-in Commands exit, cd, and status handled by shell (others passed to exec())
-	// 	no redirection or exit status needed for built-ins
-	
+
 	// Check if command is exit, cd, or status and return 1; otherwise return 0.	
 	if (!strcmp(curr_command->argv[0], "exit")) {
 		process_exit(curr_command);
@@ -505,6 +498,7 @@ void dispatch_command(struct command_line *curr_command) {
 
 
 // Main loop
+
 
 int main() {
 	struct command_line *curr_command;
