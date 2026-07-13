@@ -1,18 +1,10 @@
-ls
-ls > junk
 status
-cat junk
-wc < junk > junk2
-wc < junk
-test -f badfile
+echo hello
+echo hello > out.txt
+cat < out.txt
+wc < out.txt
+test -f out.txt
 status
-wc < badfile
+badcommand
 status
-badfile
-status
-pwd
-cd
-pwd
-cd ..
-pwd
 exit

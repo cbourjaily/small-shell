@@ -1,5 +1,3 @@
-sleep 2 &
-ps
-# Give the background process time to finish
-sleep 3
+sleep 1 &
+sleep 2
 exit
