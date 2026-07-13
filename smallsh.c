@@ -110,7 +110,6 @@ struct command_line *parse_input()
 }
 
 int check_built_ins(struct command_line *curr_command);
-void route_built_in(struct command_line *curr_command); 
 void process_exit(struct command_line *curr_command);
 void process_cd(struct command_line *curr_command);
 void print_status();
@@ -168,11 +167,8 @@ int main() {
 		}
 
 		// Check for arguments
-		if (check_built_ins(curr_command)) {					// Can probably change to !check_built_ins and combine check/route logic below
-			route_built_in(curr_command);
-		}
-		else {
-			route_command(curr_command);					// in that case, !built_in would just call this. 
+		if (!(check_built_ins(curr_command))) {
+			route_command(curr_command);
 		}
 		// Check for completed background processes
 		free_command(curr_command);
@@ -183,33 +179,31 @@ int main() {
 int check_built_ins(struct command_line *curr_command) {
 	// Built-in Commands exit, cd, and status handled by shell (others passed to exec())
 	// 	no redirection or exit status needed for built-ins
-	// 		run in foreground and ignore &
+	// 	run in foreground and ignore &
 	
 	// Check if command is exit, cd, or status and return 0 if not.	
 	if (!strcmp(curr_command->argv[0], "exit")) {
+		process_exit(curr_command);
 		return 1;
 	}
-	if (!strcmp(curr_command->argv[0], "cd")) {
+	else if (!strcmp(curr_command->argv[0], "cd")) {
+		process_cd(curr_command);
 		return 1;
 	}
-	if (!strcmp(curr_command->argv[0], "status")) {
+	else if (!strcmp(curr_command->argv[0], "status")) {
+		print_status();
 		return 1;
 	}
 	// No built-ins found
 	return 0;
 }
 
-
-void route_built_in(struct command_line *curr_command) {
-    if (!strcmp(curr_command->argv[0], "exit")) {
-        process_exit(curr_command);
-    }
-    else if (!strcmp(curr_command->argv[0], "cd")) {
-        process_cd(curr_command);
-    }
-    else if (!strcmp(curr_command->argv[0], "status")) {
-        print_status();
-    }
+void route_command(struct command_line *curr_command) {
+	if (curr_command->is_bg) {
+		execute_background(curr_command);
+	} else {
+		execute_foreground(curr_command);
+	}
 }
 
 void process_exit(struct command_line *curr_command) {
@@ -254,17 +248,6 @@ void set_status(char* message, int value) {
 	sprintf(current_status, "%s %d", message, value);
 }
 
-void route_command(struct command_line *curr_command) {
-	if (curr_command->is_bg) {
-		execute_background(curr_command);
-	} else {
-		execute_foreground(curr_command);
-	}
-}
-
-
-/* Code citation: Aspects of the function execute_foreground are adapted from example code on Module 6: Exploration: Process API - Executing a New Program */
-/* Code citation: Aspects of file redirection adapted from Module 7: Exploration: Processes and I/O */
 void execute_foreground(struct command_line *curr_command) {
 	
 	// Create child_status variable
