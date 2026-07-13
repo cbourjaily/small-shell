@@ -1,2 +1,9 @@
 *.o
 smallsh
+core
+core.*
+junk
+junk2
+tests/output/
+*~
+

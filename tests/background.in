@@ -1,0 +1,5 @@
+sleep 2 &
+ps
+# Give the background process time to finish
+sleep 3
+exit

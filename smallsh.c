@@ -7,10 +7,10 @@
 */
 
 
-#include <stdio.h>	// For printf(), perror(), 
+#include <stdio.h>	// For printf(), perror()
 #include <stdbool.h>	// For bool
 #include <stdlib.h>	// For exit(), 
-#include <string.h>
+#include <string.h>	// For strcmp(), strlen(), strtok(), strdup(), strcspn()
 #include <unistd.h>	// For chdir(), getcwd(), execvp(), getpid(), fork()
 #include <sys/wait.h>	// For waitpid(), 
 #include <sys/types.h>	// For pid_t
@@ -27,25 +27,24 @@
 #define OFF_LENGTH 30
 
 
-// 	Foreground only state, initially zero for false
+// Foreground only state, initially zero for false
 int foreground_only = 0;
 
 // last foreground exit, updated by execute_foreground() and read by status()
 char current_status[30];
 void set_status(char* message, int value);
 
-// Struct for storing result of bg exit
+// Struct for storing result of background exit
 struct bg_result {
 	pid_t pid;
 	int exit_code;
-	bool normal_exit;			// True if normal, false for signal
+	bool normal_exit;			// True if normal, false if triggered by signal
 };
 
 // Array to hold results
 struct bg_result finished_bgs[MAX_ARGS];
 volatile sig_atomic_t finished_count = 0;
 
-/* Code citation: Parsing engine adapted from sample_parser.c file provided on the assignment page.*/
 struct command_line
 {	
 //	command is words separated by spaces
@@ -175,11 +174,11 @@ int main() {
 		}
 
 		// Check for arguments
-		if (check_built_ins(curr_command)) {
+		if (check_built_ins(curr_command)) {					// Can probably change to !check_built_ins and combine check/route logic below
 			route_built_in(curr_command);
 		}
 		else {
-			route_command(curr_command);
+			route_command(curr_command);					// in that case, !built_in would just call this. 
 		}
 		// Check for completed background processes
 		free_command(curr_command);
@@ -343,8 +342,17 @@ void execute_foreground(struct command_line *curr_command) {
 			fflush(stderr);
 			exit(EXIT_FAILURE);
 		default:
-			// wait for child process and store id
-			pid_t child_pid = waitpid(spawn_pid, &child_status, 0);
+
+			pid_t child_pid;
+
+			do {												// NEW
+				child_pid = waitpid(spawn_pid, &child_status, 0);
+			} while (child_pid == -1 && errno == EINTR);
+
+			if (child_pid == -1) {
+				perror("waitpid");
+				return;
+			}
 			
 			// Save exit code
 			if (WIFEXITED(child_status)) {
@@ -352,6 +360,7 @@ void execute_foreground(struct command_line *curr_command) {
 				set_status(EXIT_MESSAGE, WEXITSTATUS(child_status));
 				break;
 			}
+						
 			else if (WIFSIGNALED(child_status)) {
 				// Get the signal with WTERMSIG
 				int signal = WTERMSIG(child_status);

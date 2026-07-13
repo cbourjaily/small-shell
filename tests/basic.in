@@ -1,0 +1,18 @@
+ls
+ls > junk
+status
+cat junk
+wc < junk > junk2
+wc < junk
+test -f badfile
+status
+wc < badfile
+status
+badfile
+status
+pwd
+cd
+pwd
+cd ..
+pwd
+exit

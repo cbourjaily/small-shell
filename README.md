@@ -25,7 +25,7 @@ This project demonstrates core Unix systems programming concepts including proce
 Compile with GCC:
 
 ```bash
-gcc smallsh.c -o smallsh
+gcc -o smallsh smallsh.c
 
 ```
 
