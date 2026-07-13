@@ -40,27 +40,27 @@ Start the shell:
 Example session:
 
 ```text
-: ls
+~/projects/smallsh$ ls
 LICENSE
 README.md
 smallsh
 smallsh.c
 
-: pwd
-/home/user/projects/small-shell
+~/projects/smallsh$ pwd
+/home/user/projects/smallsh
 
-: sleep 10 &
+~/projects/smallsh$ sleep 10 &
 background pid is 12345
 
-: status
+~/projects/smallsh$ status
 exit value 0
 
-: echo hello > out.txt
+~/projects/smallsh$ echo hello > out.txt
 
-: cat < out.txt
+~/projects/smallsh$ cat < out.txt
 hello
 
-: exit
+~/projects/smallsh$ exit
 ```
 
 ## Topics

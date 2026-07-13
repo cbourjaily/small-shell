@@ -1,3 +1,3 @@
-: background pid is <PID>
-: background pid <PID> is done: exit value 0
-: 
+~/git/portfolio/projects/smallsh/tests$ background pid is <PID>
+~/git/portfolio/projects/smallsh/tests$ background pid <PID> is done: exit value 0
+~/git/portfolio/projects/smallsh/tests$ 

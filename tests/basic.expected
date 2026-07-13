@@ -1,8 +1,8 @@
-: exit value 0
-: hello
-: : hello
-: 1 1 6
-: : exit value 0
-: badcommand: no such file or directory
-: exit value 1
-: 
+~/git/portfolio/projects/smallsh/tests$ exit value 0
+~/git/portfolio/projects/smallsh/tests$ hello
+~/git/portfolio/projects/smallsh/tests$ ~/git/portfolio/projects/smallsh/tests$ hello
+~/git/portfolio/projects/smallsh/tests$ 1 1 6
+~/git/portfolio/projects/smallsh/tests$ ~/git/portfolio/projects/smallsh/tests$ exit value 0
+~/git/portfolio/projects/smallsh/tests$ badcommand: no such file or directory
+~/git/portfolio/projects/smallsh/tests$ exit value 1
+~/git/portfolio/projects/smallsh/tests$ 

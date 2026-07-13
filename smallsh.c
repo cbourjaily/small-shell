@@ -25,7 +25,9 @@
 #define FOREGROUND_OFF "\nExiting foreground-only mode\n"
 #define ON_LENGTH 50
 #define OFF_LENGTH 30
-
+#define CWD_BUF_SIZE 1024
+#define HOST_BUF_SIZE 256
+#define PROMPT_BUF_SIZE 1536
 
 // Foreground only state, initially 0 for false
 int foreground_only = 0;
@@ -59,11 +61,15 @@ struct command_line
 	bool is_bg;
 };
 
+void build_prompt(char *prompt_buf, size_t buf_size);
+
 struct command_line *parse_input()
 {
 	char input[INPUT_LENGTH];
-
-	printf(": ");
+	char prompt[512];
+	
+	build_prompt(prompt, sizeof(prompt));
+	printf("%s", prompt);
 	fflush(stdout);
 	
 	while (fgets(input, INPUT_LENGTH, stdin) == NULL) {
@@ -98,6 +104,7 @@ struct command_line *parse_input()
 			char *filename = strtok(NULL, " \n");
 			if (filename) {
 				curr_command->output_file = strdup(filename);
+			}
 		}
 		else if (!strcmp(token, "&")) {
 
@@ -118,8 +125,8 @@ struct command_line *parse_input()
 }
 
 // Utility / lifecycle
+void initialize_shell(void);
 void install_handler(int signo, void (*handler)(int)); 
-void initialize_shell();
 void set_status(char* message, int value);
 void check_zombies(); 
 void free_command(struct command_line *cmd);
@@ -144,18 +151,6 @@ void dispatch_command(struct command_line *curr_command);
 // Utility / lifecycle
 
 
-void install_handler(int signo, void (*handler)(int)) {
-	struct sigaction action = {0};
-
-	action.sa_handler = handler;
-	action.sa_flags = 0;
-	
-	if (sigaction(signo, &action, NULL) == -1) {
-		perror("sigaction");
-		exit(EXIT_FAILURE);
-	}
-}
-
 void initialize_shell() {
 	// Initialize foreground process exit state
 	set_status(EXIT_MESSAGE, 0);
@@ -168,6 +163,40 @@ void initialize_shell() {
 
 	// Initialize SIGCHLD
 	install_handler(SIGCHLD, handle_SIGCHLD);	
+}
+
+void install_handler(int signo, void (*handler)(int)) {
+	struct sigaction action = {0};
+
+	action.sa_handler = handler;
+	action.sa_flags = 0;
+	
+	if (sigaction(signo, &action, NULL) == -1) {
+		perror("sigaction");
+		exit(EXIT_FAILURE);
+	}
+}
+
+// Prompt format (user@host:path$) follows standard Unix shell convention
+void build_prompt(char *prompt_buf, size_t buf_size) {
+	char cwd[CWD_BUF_SIZE];
+	char short_path[CWD_BUF_SIZE];
+
+	if (getcwd(cwd, sizeof(cwd)) == NULL) {
+		strcpy(cwd, "?");
+	}
+
+	// Truncate HOME prefix to ~
+	char *home = getenv("HOME");
+	if (home && strncmp(cwd, home, strlen(home)) == 0) {
+		snprintf(short_path, sizeof(short_path), "~%s", cwd + strlen(home));
+	}
+	else {
+		strncpy(short_path, cwd, sizeof(short_path) -1);
+		short_path[sizeof(short_path) - 1] = '\0';
+	}
+	
+	snprintf(prompt_buf, buf_size, "%s$ ", short_path);
 }
 
 void set_status(char* message, int value) {
