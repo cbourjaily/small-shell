@@ -6,7 +6,6 @@
  * and includes built-in commands: exit, cd, and status.
 */
 
-
 #include <stdio.h>	// For printf(), perror()
 #include <stdbool.h>	// For bool
 #include <stdlib.h>	// For exit(), 
@@ -27,7 +26,7 @@
 #define OFF_LENGTH 30
 
 
-// Foreground only state, initially zero for false
+// Foreground only state, initially 0 for false
 int foreground_only = 0;
 
 // last foreground exit, updated by execute_foreground() and read by status()
@@ -50,7 +49,7 @@ struct command_line
 //	command is words separated by spaces
 	char *argv[MAX_ARGS + 1];
 	int argc;
-//	Standard input/output redirection with >/<  followed by a filename after all arguments.
+//	Standard input/output redirection with > <  followed by a filename after all arguments.
 // 			Input redirection can appear before or after output redirection.
 	char *input_file;
 	char *output_file;
@@ -62,6 +61,7 @@ struct command_line
 struct command_line *parse_input()
 {
 	char input[INPUT_LENGTH];
+	struct command_line *curr_command = (struct command_line*) calloc(1, sizeof(struct command_line));
 
 	printf(": ");
 	fflush(stdout);
@@ -79,8 +79,6 @@ struct command_line *parse_input()
 	if (input[0] == '\0' || input[0] == '#') {
 		return NULL;
 	}
-
-	struct command_line *curr_command = (struct command_line *) calloc(1, sizeof(struct command_line));
 
 	// Tokenize the input
 	char *token = strtok(input, " \n");
@@ -109,34 +107,49 @@ struct command_line *parse_input()
 	return curr_command;
 }
 
-void dispatch_command(struct command_line *curr_command);
-void process_exit(struct command_line *curr_command);
-void process_cd(struct command_line *curr_command);
-void print_status();
+// Utility / lifecycle
+void initialize_shell();
 void set_status(char* message, int value);
-void execute_foreground(struct command_line *curr_command);
-void execute_background(struct command_line *curr_command);
-void handle_SIGTSTP (int signo);
-void handle_SIGCHLD(int signo);
 void check_zombies(); 
 void free_command(struct command_line *cmd);
 
+// Signal handlers
+void handle_SIGTSTP (int signo);
+void handle_SIGCHLD(int signo);
 
-int main() {
-	struct command_line *curr_command;
+// Built-in commands
+void process_exit(struct command_line *curr_command);
+void process_cd(struct command_line *curr_command);
+void print_status();
 
+// External commands
+void execute_foreground(struct command_line *curr_command);
+void execute_background(struct command_line *curr_command);
+
+// Dispatch
+void dispatch_command(struct command_line *curr_command);
+
+
+// Utility / lifecycle
+
+void initialize_shell() {
 	// Initialize foreground process exit state
 	set_status(EXIT_MESSAGE, 0);
 	
 	// Initialize SIGINT_action struct to be empty
 	struct sigaction SIGINT_action = {0};
+	
 	// Set SIGINT_action signal handler to ignore
 	//  		Shell and bg children  must ignore SIGINT
 	SIGINT_action.sa_handler = SIG_IGN;
 	// No flags
 	SIGINT_action.sa_flags = 0;
+
 	// Install signal handler
-	sigaction(SIGINT, &SIGINT_action, NULL);
+	if (sigaction(SIGINT, &SIGINT_action, NULL) == -1) {
+		perror("sigaction(SIGINT)");
+		exit(EXIT_FAILURE);
+	}
 
 	// SIGTSTP: Children must ignore, shell displays message
 	struct sigaction SIGTSTP_action = {0};
@@ -144,56 +157,102 @@ int main() {
 	// Set signal handler to handle_SIGTSTP(), which toggles foreground_only state
 	SIGTSTP_action.sa_handler = handle_SIGTSTP;
 	SIGTSTP_action.sa_flags = 0;
-	sigaction(SIGTSTP, &SIGTSTP_action, NULL);
+
+	if (sigaction(SIGTSTP, &SIGTSTP_action, NULL) == -1) {
+		perror("sigaction(SIGTSTP)");
+		exit(EXIT_FAILURE);
+	}
 
 	// Initialize handle_SIGCHLD
 	struct sigaction SIGCHLD_action = {0};
+	
 	// Set handler function
 	SIGCHLD_action.sa_handler = handle_SIGCHLD;
 	SIGCHLD_action.sa_flags = 0;
-	sigaction(SIGCHLD, &SIGCHLD_action, NULL);
+	
+	if (sigaction(SIGCHLD, &SIGCHLD_action, NULL) == -1) {
+		perror("sigaction(SIGCHLD)");
+		exit(EXIT_FAILURE);
+	}
+}
 
-	while (true)
-	{
-		check_zombies();
+void set_status(char* message, int value) {
+	sprintf(current_status, "%s %d", message, value);
+}
 
-		// Retrieve next command	
-		curr_command = parse_input();
-		
-		// Handle blank lines and comments
-		if (curr_command == NULL) {
-			continue;
+void check_zombies() {
+	for (int i = 0; i < finished_count; i++) {
+		if (finished_bgs[i].normal_exit) {
+			printf("background pid %d is done: exit value %d\n", 
+					finished_bgs[i].pid, finished_bgs[i].exit_code);
+		} else {
+			printf("background pid %d is done: terminated by signal %d\n", 
+					finished_bgs[i].pid, finished_bgs[i].exit_code);
 		}
-
-		// Command dispatch
-		dispatch_command(curr_command);
-	
-		free_command(curr_command);
 	}
-	return EXIT_SUCCESS;
+	fflush(stdout);
+	finished_count = 0;			// Reset count
 }
 
-void dispatch_command(struct command_line *curr_command) {
-	// Built-in Commands exit, cd, and status handled by shell (others passed to exec())
-	// 	no redirection or exit status needed for built-ins
-	
-	// Check if command is exit, cd, or status and return 1; otherwise return 0.	
-	if (!strcmp(curr_command->argv[0], "exit")) {
-		process_exit(curr_command);
+void free_command(struct command_line *cmd) {
+	if (cmd == NULL) return;
+
+	for (int i = 0; i < cmd->argc; i++) {
+		free(cmd->argv[i]);
 	}
-	else if (!strcmp(curr_command->argv[0], "cd")) {
-		process_cd(curr_command);
-	}
-	else if (!strcmp(curr_command->argv[0], "status")) {
-		print_status();
-	}
-	else if (curr_command->is_bg) {
-		execute_background(curr_command);
-	} 
-	else {
-		execute_foreground(curr_command);
+	free(cmd->input_file);
+	free(cmd->output_file);
+	free(cmd);
+}
+
+
+// Signal handlers
+
+
+void handle_SIGTSTP (int signo) {
+	(void)signo;
+
+	// Toggle global state variable foreground_only
+	foreground_only ^= 1;
+
+	// Write message FOREGROUND_ON and FOREGROUND_OFF
+	if (!foreground_only) {
+		write(STDOUT_FILENO, FOREGROUND_OFF, OFF_LENGTH);
+	} else {
+		write(STDOUT_FILENO, FOREGROUND_ON, ON_LENGTH);
 	}
 }
+
+/* Code citation: Aspects of handle_SIGCHLD() adapted from Kerrisk (2010), The Linux Programming Interface: pp. 556-8 */
+void handle_SIGCHLD(int signo) {
+	(void)signo;
+
+	int child_status;
+	pid_t child_pid;
+	int saved_errno = errno;
+	
+	// Loop repeatedly calling waitpid() with WNOHANG flag until all children are reaped.
+	// 	The loop continues until waitpid() returns 0 for no more stopped children or -1 for error
+	while ((child_pid = waitpid(-1, &child_status, WNOHANG)) > 0) {
+		// count number of digits in child_pid for write()
+		if (finished_count < MAX_ARGS) {
+			finished_bgs[finished_count].pid = child_pid;
+			if (WIFEXITED(child_status)) {
+				finished_bgs[finished_count].exit_code = WEXITSTATUS(child_status);
+				finished_bgs[finished_count].normal_exit = true;
+			}
+			else if (WIFSIGNALED(child_status)) {
+				finished_bgs[finished_count].exit_code = WTERMSIG(child_status);
+				finished_bgs[finished_count].normal_exit = false;
+			}
+			finished_count++;
+		}
+	}
+	errno = saved_errno;
+}
+
+
+// Built-in commands
 
 void process_exit(struct command_line *curr_command) {
 	// kill background processes
@@ -233,9 +292,8 @@ void print_status() {
 	printf("%s\n", current_status);
 }
 
-void set_status(char* message, int value) {
-	sprintf(current_status, "%s %d", message, value);
-}
+
+// External commands
 
 void execute_foreground(struct command_line *curr_command) {
 	
@@ -344,7 +402,6 @@ void execute_foreground(struct command_line *curr_command) {
 	}
 }
 			
-/* Code citation: important execute_background functionality has been adapted from Module 6: Exploration: Process API - MOnitoring Child Processes */
 void execute_background(struct command_line *curr_command) {
 	// Fork child process
 	pid_t spawn_pid = fork();
@@ -421,69 +478,54 @@ void execute_background(struct command_line *curr_command) {
 	}
 }
 
-void handle_SIGTSTP (int signo) {
-	(void)signo;
 
-	// Toggle global state variable foreground_only
-	foreground_only ^= 1;
+// Dispatch
 
-	// Write message FOREGROUND_ON and FOREGROUND_OFF
-	if (!foreground_only) {
-		write(STDOUT_FILENO, FOREGROUND_OFF, OFF_LENGTH);
-	} else {
-		write(STDOUT_FILENO, FOREGROUND_ON, ON_LENGTH);
-	}
-}
-
-/* Code citation: Elements of handle_SIGCHLD adapted from Kerrisk (2010), The Linux Programming Interface: pp. 556-8 */
-void handle_SIGCHLD(int signo) {
-	(void)signo;
-
-	int child_status;
-	pid_t child_pid;
-	int saved_errno = errno;
+void dispatch_command(struct command_line *curr_command) {
+	// Built-in Commands exit, cd, and status handled by shell (others passed to exec())
+	// 	no redirection or exit status needed for built-ins
 	
-	// Loop repeatedly calling waitpid() with WNOHANG flag until all children are reaped.
-	// 	The loop continues until waitpid() returns 0 for no more stopped children or -1 for error
-	while ((child_pid = waitpid(-1, &child_status, WNOHANG)) > 0) {
-		// count number of digits in child_pid for write()
-		if (finished_count < MAX_ARGS) {
-			finished_bgs[finished_count].pid = child_pid;
-			if (WIFEXITED(child_status)) {
-				finished_bgs[finished_count].exit_code = WEXITSTATUS(child_status);
-				finished_bgs[finished_count].normal_exit = true;
-			}
-			else if (WIFSIGNALED(child_status)) {
-				finished_bgs[finished_count].exit_code = WTERMSIG(child_status);
-				finished_bgs[finished_count].normal_exit = false;
-			}
-			finished_count++;
-		}
+	// Check if command is exit, cd, or status and return 1; otherwise return 0.	
+	if (!strcmp(curr_command->argv[0], "exit")) {
+		process_exit(curr_command);
 	}
-	errno = saved_errno;
+	else if (!strcmp(curr_command->argv[0], "cd")) {
+		process_cd(curr_command);
+	}
+	else if (!strcmp(curr_command->argv[0], "status")) {
+		print_status();
+	}
+	else if (curr_command->is_bg) {
+		execute_background(curr_command);
+	} 
+	else {
+		execute_foreground(curr_command);
+	}
 }
 
-void check_zombies() {
-	for (int i = 0; i < finished_count; i++) {
-		if (finished_bgs[i].normal_exit) {
-			printf("background pid %d is done: exit value %d\n", 
-					finished_bgs[i].pid, finished_bgs[i].exit_code);
-		} else {
-			printf("background pid %d is done: terminated by signal %d\n", 
-					finished_bgs[i].pid, finished_bgs[i].exit_code);
+
+// Main loop
+
+int main() {
+	struct command_line *curr_command;
+
+	initialize_shell();
+
+	while (true)
+	{
+		check_zombies();
+
+		// Retrieve next command	
+		curr_command = parse_input();
+		
+		// Handle blank lines and comments
+		if (curr_command == NULL) {
+			continue;
 		}
-	}
-	fflush(stdout);
-	finished_count = 0;			// Reset count
-}
 
-void free_command(struct command_line *cmd) {
-	if (cmd == NULL) return;
-
-	for (int i = 0; i < cmd->argc; i++) {
-		free(cmd->argv[i]);
+		dispatch_command(curr_command);
+	
+		free_command(curr_command);
 	}
-	free(cmd->input_file);
-	free(cmd->output_file);
-	free(cmd);
+	return EXIT_SUCCESS;
 }
