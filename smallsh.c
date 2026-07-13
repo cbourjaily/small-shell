@@ -65,21 +65,18 @@ struct command_line *parse_input()
 {
 	char input[INPUT_LENGTH];
 
-	while (true) {
-		printf(": ");
-		fflush(stdout);
-			
-		if (fgets(input, INPUT_LENGTH, stdin) == NULL) {
-			if (errno == EINTR) {
-				// a signal has occured, clear error and restart loop
-				clearerr(stdin);
-				continue;
-			}
-			return NULL;
+	printf(": ");
+	fflush(stdout);
+	
+	while (fgets(input, INPUT_LENGTH, stdin) == NULL) {
+		if (errno == EINTR) {
+			// a signal has occured, clear error and restart loop
+			clearerr(stdin);
+			continue;
 		}
-		break;
+		return NULL;
 	}
-
+	
 	input[strcspn(input, "\n")] = 0;
 	
 	if (input[0] == '\0' || input[0] == '#') {
@@ -456,6 +453,8 @@ void execute_background(struct command_line *curr_command) {
 }
 
 void handle_SIGTSTP (int signo) {
+	(void)signo;
+
 	// Toggle global state variable foreground_only
 	foreground_only ^= 1;
 
@@ -469,6 +468,8 @@ void handle_SIGTSTP (int signo) {
 
 /* Code citation: Elements of handle_SIGCHLD adapted from Kerrisk (2010), The Linux Programming Interface: pp. 556-8 */
 void handle_SIGCHLD(int signo) {
+	(void)signo;
+
 	int child_status;
 	pid_t child_pid;
 	int saved_errno = errno;
