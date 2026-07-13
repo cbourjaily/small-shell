@@ -59,8 +59,6 @@ struct command_line
 	bool is_bg;
 };
 
-
-
 struct command_line *parse_input()
 {
 	char input[INPUT_LENGTH];
@@ -70,7 +68,6 @@ struct command_line *parse_input()
 	
 	while (fgets(input, INPUT_LENGTH, stdin) == NULL) {
 		if (errno == EINTR) {
-			// a signal has occured, clear error and restart loop
 			clearerr(stdin);
 			continue;
 		}
