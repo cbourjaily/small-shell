@@ -54,28 +54,27 @@ Example session:
 
 ```text
 ~/projects/smallsh$ ls
-LICENSE
-Makefile
-README.md
-smallsh
-smallsh.c
-tests
-
-~/projects/smallsh$ pwd
-/home/user/projects/smallsh
-
-~/projects/smallsh$ sleep 10 &
-background pid is 12345
-
+junk  junk2  LICENSE  Makefile	README.md  smallsh  smallsh.c  tests
+~/projects/smallsh$ ls > junk
+~/projects/smallsh$ wc < junk > junk2
+~/projects/smallsh$ cat junk2
+ 8  8 62
+~/projects/smallsh$ sleep 5
+^Cterminated by signal 2
 ~/projects/smallsh$ status
-exit value 0
-
-~/projects/smallsh$ echo hello > out.txt
-
-~/projects/smallsh$ cat < out.txt
-hello
-
-~/projects/smallsh$ exit
+terminated by signal 2
+~/projects/smallsh$ sleep 40 &
+background pid is 2185952
+~/projects/smallsh$ kill -15 2185952
+background pid 2185952 is done: terminated by signal 15
+~/projects/smallsh$ ^Z
+Entering foreground-only mode (& is now ignored)
+~/projects/smallsh$ sleep 5 &
+~/projects/smallsh$ ^Z
+Exiting foreground-only mode
+~/projects/smallsh$ cd
+~$ pwd
+/home/user
 ```
 
 ## Topics
