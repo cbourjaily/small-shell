@@ -7,7 +7,7 @@
 */
 
 #include <stdio.h>	// For printf(), fprintf(), snprintf(), sprintf(), perror(), fgets(), fflush()
-#include <stdlib.h>	// For calloc(), getenv(), exit() 
+#include <stdlib.h>	// For calloc(), getenv(), exit(), strtol();
 #include <string.h>	// For strcmp(), strlen(), strtok(), strdup(), strcspn()
 #include <unistd.h>	// For chdir(), execvp(), fork(), dup2(), close(), write(), STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO
 #include <signal.h>     // for sigaction(), kill(), SIG_IGN, SIG_DFL, sig_atomic_t
@@ -32,6 +32,11 @@
 // Foreground only state, initially 0 for false
 int foreground_only = 0;
 
+// Set when hand_SIGTSTP just printed a mode-toggle message, so parse_input knows
+// to redraw the prompt. Not used for SIGCHLD interrupts, which must not redraw,
+// since those can land mid-keystroke.
+volatile sig_atomic_t tstp_toggled = 0;
+
 // last foreground exit, updated by execute_foreground() and read by status()
 char current_status[30];
 void set_status(char* message, int value);
@@ -46,6 +51,11 @@ struct bg_result {
 // Array to hold results
 struct bg_result finished_bgs[MAX_ARGS];
 volatile sig_atomic_t finished_count = 0;
+
+// Tracks background children that are still running (not yet reaped).
+// Used so 'kill' on one of the background jobs can block deterministically.
+pid_t running_bgs[MAX_ARGS];
+volatile sig_atomic_t running_count = 0;
 
 struct command_line
 {	
@@ -75,6 +85,12 @@ struct command_line *parse_input()
 	while (fgets(input, INPUT_LENGTH, stdin) == NULL) {
 		if (errno == EINTR) {
 			clearerr(stdin);
+
+			if (tstp_toggled) {
+				tstp_toggled = 0;
+				printf("%s", prompt);
+				fflush(stdout);
+			}
 			continue;
 		}
 		return NULL;
@@ -128,7 +144,9 @@ struct command_line *parse_input()
 void initialize_shell(void);
 void install_handler(int signo, void (*handler)(int)); 
 void set_status(char* message, int value);
-void check_zombies(); 
+bool is_tracked_running(pid_t pid);
+void remove_from_running(pid_t pid);
+void check_zombies();
 void free_command(struct command_line *cmd);
 
 // Signal handlers
@@ -203,6 +221,24 @@ void set_status(char* message, int value) {
 	sprintf(current_status, "%s %d", message, value);
 }
 
+bool is_tracked_running(pid_t pid) {
+	for (int i = 0; i < running_count; i++) {
+		if (running_bgs[i] == pid) return true;
+	}
+	return false;
+}
+
+void remove_from_running(pid_t pid) {
+	for (int i = 0; i < running_count; i++) {
+		if (running_bgs[i] == pid) {
+			running_bgs[i] = running_bgs[running_count - 1];
+			running_count--;
+			return;
+		}
+	}
+}
+
+
 void check_zombies() {
 	// snapshot and reset the count to prevent race condition with SIGCHLD
 	int count = finished_count;
@@ -249,6 +285,8 @@ void handle_SIGTSTP (int signo) {
 	} else {
 		write(STDOUT_FILENO, FOREGROUND_ON, ON_LENGTH);
 	}
+
+	tstp_toggled = 1;
 }
 
 /* Code citation: Aspects of handle_SIGCHLD() adapted from Kerrisk (2010), The Linux Programming Interface: pp. 556-8 */
@@ -262,6 +300,15 @@ void handle_SIGCHLD(int signo) {
 	// Loop repeatedly calling waitpid() with WNOHANG flag until all children are reaped.
 	// 	The loop continues until waitpid() returns 0 for no more stopped children or -1 for error
 	while ((child_pid = waitpid(-1, &child_status, WNOHANG)) > 0) {
+		// Remove from the running table now that it's been reaped
+		for (int i = 0; i < running_count; i++) {
+			if (running_bgs[i] == child_pid) {
+				running_bgs[i] = running_bgs[running_count - 1];
+				running_count--;
+				break;
+			}
+		}
+
 		// count number of digits in child_pid for write()
 		if (finished_count < MAX_ARGS) {
 			finished_bgs[finished_count].pid = child_pid;
@@ -496,6 +543,9 @@ void execute_background(struct command_line *curr_command) {
 				exit(EXIT_FAILURE);
 			}
 		default:
+			if (running_count < MAX_ARGS) {
+				running_bgs[running_count++] = spawn_pid;
+			}
 			printf("background pid is %d\n", spawn_pid);
 			return;
 	}
@@ -516,6 +566,45 @@ void dispatch_command(struct command_line *curr_command) {
 	}
 	else if (!strcmp(curr_command->argv[0], "status")) {
 		print_status();
+	}
+	else if (!strcmp(curr_command->argv[0], "kill") && curr_command->argc >= 2) {
+		// Parse target pid
+		char *pid_str = curr_command->argv[curr_command->argc - 1];
+		char *end;
+		pid_t target = (pid_t) strtol(pid_str, &end, 10);
+		bool valid_pid = (*end == '\0' && end != pid_str);
+
+		// run kill
+		execute_foreground(curr_command);
+
+		if (valid_pid && is_tracked_running(target)) {
+			// Block SIGCHLD so async handler can't reap this pid
+			sigset_t block_set, old_set;
+			sigemptyset(&block_set);
+			sigaddset(&block_set, SIGCHLD);
+			sigprocmask(SIG_BLOCK, &block_set, &old_set);
+
+			int status;
+			pid_t reaped = waitpid(target, &status, 0);
+
+			if (reaped == target) {
+				remove_from_running(target);
+				if (finished_count < MAX_ARGS) {
+					finished_bgs[finished_count].pid = target;
+					if (WIFEXITED(status)) {
+						finished_bgs[finished_count].exit_code = WEXITSTATUS(status);
+						finished_bgs[finished_count].normal_exit = true;
+					}
+					else if (WIFSIGNALED(status)) {
+						finished_bgs[finished_count].exit_code = WTERMSIG(status);
+						finished_bgs[finished_count].normal_exit = false;
+					}
+					finished_count++;
+				}
+			}
+
+			sigprocmask(SIG_SETMASK, &old_set, NULL);
+		}
 	}
 	else if (curr_command->is_bg) {
 		execute_background(curr_command);

@@ -1,6 +1,6 @@
 # Small Shell
 
-A Unix-like shell implemented in C.
+A Unix-like command shell implemented in C.
 
 This project demonstrates core Unix systems programming concepts including process creation, signal handling, job control, input/output redirection, and command execution.
 
@@ -19,14 +19,27 @@ This project demonstrates core Unix systems programming concepts including proce
   - `SIGTSTP` to toggle foreground-only mode
   - `SIGCHLD` for background process cleanup
 - Automatic zombie process reaping
+- Interactive shell prompt displaying the current working directory
+
+## Requirements
+
+- GCC
+- GNU Make
+- POSIX-compliant operating system (Linux)
 
 ## Building
 
 Compile with GCC:
 
 ```bash
-gcc -o smallsh smallsh.c
+make
 
+```
+
+Clean the build:
+
+```bash
+make clean
 ```
 
 ## Running
@@ -42,9 +55,11 @@ Example session:
 ```text
 ~/projects/smallsh$ ls
 LICENSE
+Makefile
 README.md
 smallsh
 smallsh.c
+tests
 
 ~/projects/smallsh$ pwd
 /home/user/projects/smallsh
