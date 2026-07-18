@@ -214,7 +214,7 @@ void build_prompt(char *prompt_buf, size_t buf_size) {
 		short_path[sizeof(short_path) - 1] = '\0';
 	}
 	
-	snprintf(prompt_buf, buf_size, "%s$ ", short_path);
+	snprintf(prompt_buf, buf_size, "%s: ", short_path);
 }
 
 void set_status(char* message, int value) {
@@ -245,24 +245,24 @@ void check_zombies() {
 	finished_count = 0;
 
 
-	for (int i = 0; i < count; i++) {
-		if (finished_bgs[i].normal_exit) {
-			printf("background pid %d is done: exit value %d\n", 
-					finished_bgs[i].pid, finished_bgs[i].exit_code);
-		} else {
-			printf("background pid %d is done: terminated by signal %d\n", 
-					finished_bgs[i].pid, finished_bgs[i].exit_code);
+		for (int i = 0; i < count; i++) {
+			if (finished_bgs[i].normal_exit) {
+				printf("background pid %d is done: exit value %d\n", 
+						finished_bgs[i].pid, finished_bgs[i].exit_code);
+			} else {
+				printf("background pid %d is done: terminated by signal %d\n", 
+						finished_bgs[i].pid, finished_bgs[i].exit_code);
+			}
 		}
+		fflush(stdout);
+		finished_count = 0;
 	}
-	fflush(stdout);
-	finished_count = 0;
-}
 
-void free_command(struct command_line *cmd) {
-	if (cmd == NULL) return;
+	void free_command(struct command_line *cmd) {
+		if (cmd == NULL) return;
 
-	for (int i = 0; i < cmd->argc; i++) {
-		free(cmd->argv[i]);
+		for (int i = 0; i < cmd->argc; i++) {
+			free(cmd->argv[i]);
 	}
 	free(cmd->input_file);
 	free(cmd->output_file);
